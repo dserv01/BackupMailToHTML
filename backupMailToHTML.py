@@ -54,7 +54,7 @@ except Exception as e:
     print "You can also define imap_port to get another port"
 
 try:
-    MAIL_PORT = CONFIG.get('pymail', 'imap_port')
+    MAIL_PORT = CONFIG.get('mail', 'imap_port')
 except:
     MAIL_PORT = None #Default
 

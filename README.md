@@ -1,23 +1,72 @@
-This is a backup-tool for IMAP-Mail-accounts with SSL inspired by https://github.com/RaymiiOrg/NoPriv.
-It even uses some code of it but the result is different.
-Also it is less robust against unexpected content and only works for IMAP with SSL.
+BackupMailToHTML
+=================
 
-The main feature of this tool is, that it backups emails independent of their folders or even mail-accounts.
-The problem I had with NoPriv was, that for every backup, most of the files changed.
-Not only did they changed their content, they even changed their name and another email could save with the old name.
-If you backup your backup-folder, going back in time becomes very ugly.
-This tool uses a hashcode of the header as ID and saves it with the hashcode as filename.
-Files are never deleted, meaning that you will never lose an e-mail once downloaded even if it has been deleted on the server.
-Additionally the tool only downloads mails and attachments if they haven't been downloaded before.
+Why do you need it?
+-------------------
 
-However, if you simply want a local copy of your mails, you should use NoPriv, as it is much more beautiful. Also there are no restore options. You can browse read the mails as HTML-files and show their attachments, but not upload them to the server again, if the server has lost them.
+Most Mail-Servers do not have differential backup, meaning if you accidentally delete an e-mail, you maybe have no chance to get it back.
+A more serious problem is, that a software-failure deletes some mails.
+I lost once my whole mail archive due to an unknown reason and I did no backups of them since Thunderbird saves all mails into one file and during every backup, all my mails would be uploaded to the backup-server.
+I searched for mail backup tools, but all tools I found had some shortcomings.
+The best one I found was https://github.com/RaymiiOrg/NoPriv, which I first forked but then wrote a new base app, which only uses parts of NoPriv.
+However, NoPriv is more for actually browsing your backup and takes account of folders.
+With my mail server, each folder change resulted in a new backup of the folder.
+This is a horror for differential backups and I also wanted once downloaded mails never to change again.
+Actually reading the mails is only necessary for the case of data loss and therefore a folder structure or sorting is not necessary.
+The downloaded messages however should be readable without any special tool to validate the success.
 
-The configuration is done with a simple ini-file.
-You can have multiple ini-files, if you want to backup multiple accounts.
-Simple pass the path to the config as parameter.
-If you don't pass a parameter, the config is loaded from ./config.ini
+What can it do?
+---------------
 
-I am no python expert and wrote this tool for linux with Python2.7
-You can execute the tool with ./backupMailToHTML.py as a normal script, if you made it executable.
+BackupMailToHTML will save every mail into a single HTML-file. Attachments are downloaded too and linked within the HTML.
+The folder-structure is date (of retrieval) dependant but not mailbox dependent.
+As the IMAP-Protocol does not offer global unique ids, their headers will be hashed and used as ID.
+The mails are saved under this ID and will never be deleted by the tool itself.
+This makes it possible to save even mails of different accounts into the same folder or merge two backups of the same.
+For keeping the traffic low, this hash value is also used for checking if a mail has already been downloaded.
+As the data needed to be downloaded for hashing is usually around 4KB, you can check 10.000 mails with only 40MB of traffic.
 
-The source is published with GPLv3.
+** This Tool will only read your Mail-Account but never change it. It will only connect in *READ ONLY* mode **
+
+Get it!
+---------
+Simple execute in the destination directory:
+<pre>
+git pull https://github.com/dserv01/BackupMailToHTML.git
+</pre>
+Please remember that git will create a new folder 'BackupMailToHTML' and put the files into it.
+However you can move the files anywhere you want.
+The important files are backupMailToHTML.py (Script) and config.ini (Example Configuration).
+
+Configure it!
+---------
+The configuration is done with an .ini-file.
+You can have multiple different configurations, if you want to back up multiple accounts.
+If you want to use a configuration with a different name or path than use the path to this file as parameter.
+
+The ini-file has following structure:
+<pre>
+[mail]
+imap_server = imap.mail.com
+imap_user = name@mail.com
+imap_password = password123
+#imap_port = 1337
+
+[backup]
+database_file = ./database.db
+backup_folder = ./backup-mail/
+</pre>
+Simply change it as you like.
+Do only uncomment imap_port if you define it!
+
+The database_file is the file, where the hashcodes are saved.
+backup_folder is the folder, where the emails will be saved.
+
+License
+-------------
+The source is (like NoPriv) published under the GPLv3 license.
+This means you can mostly copy and use as you like.
+Parts of NoPriv are used (mostly in modified form), but this project is neither linked to it nor will updates of it be considered.
+
+It is developed for Python2.7 and only tested with Linux.
+I am no Python-Expert and therefore the code may be not perfect.

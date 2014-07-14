@@ -25,8 +25,14 @@ The mails are saved under this ID and will never be deleted by the tool itself.
 This makes it possible to save even mails of different accounts into the same folder or merge two backups of the same.
 For keeping the traffic low, this hash value is also used for checking if a mail has already been downloaded.
 As the data needed to be downloaded for hashing is usually around 4KB, you can check 10.000 mails with only 40MB of traffic.
+The same mail will always create the same hash value and therefore the path of a mail is deterministic defined.
 
 ** This Tool will only read your Mail-Account but never change it. It will only connect in *READ ONLY* mode **
+
+If you delete messages from the backup, they will not be downloaded again (if you don't delete the database-file).
+This makes it possible to keep only the newest emails on your notebook and move other into an archive on an external hard drive.
+
+The whole header will be attached to the HTML, for the case you need them once. 
 
 Get it!
 ---------
@@ -67,11 +73,11 @@ Use it!
 
 Simple execute for the configuration you want to execute:
 <pre>
-./backupMailToHTML mymailconfig.ini
+./backupMailToHTML.py mymailconfig.ini
 </pre>
 or if you use the 'config.ini' simply
 <pre>
-./backupMailToHTML
+./backupMailToHTML.py
 </pre>
 If Linux does not want to execute it, execute 
 <pre>
@@ -79,6 +85,9 @@ chmod +x ./backupMailToHTML
 </pre>
 
 If your system doesn't like Magic Line, you have to put 'python' in front of the execution.
+
+If you want to download all mails again, you can simply delete the database file.
+Mails will be overwritten by a new copy from server but not overwritten if it does not exist on server anymore.
 
 Screenshots
 -------------

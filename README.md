@@ -62,6 +62,31 @@ Do only uncomment imap_port if you define it!
 The database_file is the file, where the hashcodes are saved.
 backup_folder is the folder, where the emails will be saved.
 
+Use it!
+--------
+
+Simple execute for the configuration you want to execute:
+<pre>
+./backupMailToHTML mymailconfig.ini
+</pre>
+or if you use the 'config.ini' simply
+<pre>
+./backupMailToHTML
+</pre>
+If Linux does not want to execute it, execute 
+<pre>
+chmod +x ./backupMailToHTML
+</pre>
+
+If your system doesn't like Magic Line, you have to put 'python' in front of the execution.
+
+Screenshots
+-------------
+
+![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot1.png "Downloading new Mails")
+![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot2.png "A mail as HTML")
+![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot3.png "Download only new Mails")
+
 License
 -------------
 The source is (like NoPriv) published under the GPLv3 license.

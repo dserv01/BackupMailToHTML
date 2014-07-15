@@ -89,12 +89,43 @@ If your system doesn't like Magic Line, you have to put 'python' in front of the
 If you want to download all mails again, you can simply delete the database file.
 Mails will be overwritten by a new copy from server but not overwritten if it does not exist on server anymore.
 
+Automatize it!
+---------------
+
+If you want to let your server backup your mails automatically you can do this quite simple (at least with Linux):
+
+
 Screenshots
 -------------
 
 ![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot1.png "Downloading new Mails")
 ![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot2.png "A mail as HTML")
 ![Alt text](http://dserv01.de/files/BackupMailToHTML/screenshot3.png "Download only new Mails")
+
+Is it save?
+------------
+
+I am using the tool by myself to ensure it won't have any errors.
+Additionally I am trying to improve the code, to make it better understandable.
+
+I am not stealing your passwords and you can check this!
+As your password is only in the config.ini, I first have to load the file.
+This is done once. Now check, where the variable is used. You will notice, that I only use it for establishing the connection.
+Additionally there is no connection, beside the mail connection. Therefore the only possibility for me to steal something would be via your mail account.
+However, I only access it in Read-Mode, so there is no way to transmit any stolen data.
+
+One safety aspect is to mention: The configuration is not encrypted! If someone steals your configuration, he has access to your mails! So be aware, that this file is read-protected by the file system. 
+
+
+Planed
+---------
+- Time Constraint
+- Folder Constraint
+- Make Folder System changeable
+- Allow multiple attachments with same name
+- Allow attachments without a name
+- Logging
+
 
 License
 -------------

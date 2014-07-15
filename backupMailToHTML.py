@@ -22,7 +22,6 @@ MAIL_USER=None
 MAIL_PASSWORD=None 
 MAIL_PORT=None
 
-
 #Load Configuration from ini
 CONFIG = ConfigParser.RawConfigParser()
 try:
@@ -60,7 +59,7 @@ except Exception as e:
 
 try:
     MAIL_PORT = CONFIG.get('mail', 'imap_port')
-    print "Using port:", MAIL_PORT
+    logging.info("Using port: %s", MAIL_PORT)
 except:
     MAIL_PORT = None #Default
 
@@ -78,9 +77,9 @@ try:
     DATABASE_FILE = open(DATABASE_FILE_PATH, 'r')
 except:
     DATABASE_FILE = open(DATABASE_FILE_PATH, 'w+')
-    print "Created New Database ",DATABASE_FILE_PATH
+    logging.info("Created New Database %s",DATABASE_FILE_PATH)
 
-logging.info("Loading Database...")
+print "Loading Database...."
 for line in DATABASE_FILE:
     DATABASE.add(line.replace('\n',''))
 logging.info("Loaded %i mail hash values from database", len(DATABASE))
@@ -89,7 +88,7 @@ DATABASE_FILE.close()
 #Open Database-File for appending new HashCodes
 DATABASE_FILE = open(DATABASE_FILE_PATH, 'a') 
 
-
+print "Connecting to Server..."
 #Init Mail Connection
 MAIL_CONNECTION = imaplib.IMAP4_SSL(MAIL_SERVER, MAIL_PORT) if MAIL_PORT else imaplib.IMAP4_SSL(MAIL_SERVER) 
 try:
@@ -99,6 +98,8 @@ except imaplib.IMAP4.error as e:
     logging.error("Could not connect to %s@%s", MAIL_USER,MAIL_SERVER)
     logging.error("Reason: %s", e)
     exit(1)
+
+print "Running Backup...."
 
 #fetches the mailboxes/mailfolders lik "INBOX", "INBOX.Archives.2011" ('.' is separator)
 # and gives it back as List
@@ -437,6 +438,7 @@ def writeToHTML(lazy_mail, attachments, html_file):
 #E.g for folder_prefix="2014/05/03/4a9fd924" and filename="photo.jpg" it will be "2014/05/03/4a9fd924-photo.jpg"
 def saveAttachmentsToHardDisk(lazy_mail, folder):
     attachments_tuple_for_html = []
+    filename_count = dict() #to handle attachments with same name
     successfull = True
     for part in lazy_mail.getParsedMail().walk():
         content_maintype = part.get_content_maintype()
@@ -451,7 +453,16 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
             logging.warning("Empty part in mail. Don't know what to do with it!")
             logging.debug(str(part))
             continue
-        
+       
+        #put a (x) behind filename if same filename already exists
+        if attachment_filename in filename_count:
+            logging.debug("Same Filename %s",attachment_filename)
+            root, ext = os.path.splitext(attachment_filename)
+            attachment_filename = root+"("+filename_count[attachment_filename]+")"+ext
+            filename_count[attachment_filename] = filename_count[attachment_filename]+1
+        else:
+            filename_count[attachment_filename] = 1            
+       
         attachment_folder_name = os.path.join("attachments-"+lazy_mail.getHashcode(),"")
         attachment_folder_path = os.path.join(folder, attachment_folder_name) 
         attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,attachment_filename)]        

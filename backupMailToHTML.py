@@ -2,7 +2,6 @@
 
 import sys
 import imaplib
-import getpass
 import email
 import datetime
 import hashlib
@@ -10,8 +9,10 @@ import os
 import cgi
 import re
 import ConfigParser
+import logging
 from email.header import decode_header
 
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
 #Configuration
 FOLDER_SYSTEM = "%Y/%m/%d/" #%H/%M/"
 DATABASE_FILE_PATH =None
@@ -21,16 +22,18 @@ MAIL_USER=None
 MAIL_PASSWORD=None 
 MAIL_PORT=None
 
+
 #Load Configuration from ini
 CONFIG = ConfigParser.RawConfigParser()
 try:
     if len(sys.argv)>1 and os.path.isfile(sys.argv[1]):
         CONFIG.read(sys.argv[1])
-        print "Loaded configuration: ", sys.argv[1]
+        logging.info("Loaded configuration: %s", sys.argv[1])
     else:
         CONFIG.read("./config.ini")
+        logging.info("Loaded default configuartion from ./config.ini")
 except Exception as e:
-    print "Could not load Configuration: ",e
+    logging.ctritical("Could not load Configuration: %s",e)
     exit(1)
 
 try:
@@ -40,21 +43,24 @@ try:
     DATABASE_FILE_PATH = CONFIG.get('backup','database_file')
     BACKUP_FOLDER_PATH = CONFIG.get('backup','backup_folder')
 except Exception as e:
-    print "Could not load parameters"
-    print e
+    logging.critical("Could not load parameters because of %s",e)
     print "You need to define a config.ini which could look as follows:"
-    print "[pymail]"
+    print "[mail]"
     print "imap_server = imap.mail.com"
-    print "imap_user = misterx@mail.com"
-    print "imap_password =secretpassword123"
-    print "database_file = database.db"
-    print "backup_folder = ./backup"
+    print "imap_user = name@mail.com"
+    print "imap_password = password123"
+    print ""
+    print "[backup]"
+    print "database_file = ./database.db"
+    print "backup_folder = ./backup-mail/"
     print ""
     print "You can also pass the ini by parameter and give it another name as config.ini"
     print "You can also define imap_port to get another port"
+    exit(1)
 
 try:
     MAIL_PORT = CONFIG.get('mail', 'imap_port')
+    print "Using port:", MAIL_PORT
 except:
     MAIL_PORT = None #Default
 
@@ -74,10 +80,10 @@ except:
     DATABASE_FILE = open(DATABASE_FILE_PATH, 'w+')
     print "Created New Database ",DATABASE_FILE_PATH
 
-print "Load Database..."
+logging.info("Loading Database...")
 for line in DATABASE_FILE:
     DATABASE.add(line.replace('\n',''))
-print "Loaded ",len(DATABASE)," Entries"
+logging.info("Loaded %i mail hash values from database", len(DATABASE))
 STATS_EMAIL_IN_DATABASE = len(DATABASE)
 DATABASE_FILE.close()
 #Open Database-File for appending new HashCodes
@@ -88,11 +94,11 @@ DATABASE_FILE = open(DATABASE_FILE_PATH, 'a')
 MAIL_CONNECTION = imaplib.IMAP4_SSL(MAIL_SERVER, MAIL_PORT) if MAIL_PORT else imaplib.IMAP4_SSL(MAIL_SERVER) 
 try:
     MAIL_CONNECTION.login(MAIL_USER,MAIL_PASSWORD)
+    logging.info("Successfully connected to %s@%s", MAIL_USER,MAIL_SERVER)
 except imaplib.IMAP4.error as e:
-    print "Could not Log in: ",e
-    print "User: ", MAIL_USER
-    print "Password: ", MAIL_PASSWORD
-    exit()
+    logging.error("Could not connect to %s@%s", MAIL_USER,MAIL_SERVER)
+    logging.error("Reason: %s", e)
+    exit(1)
 
 #fetches the mailboxes/mailfolders lik "INBOX", "INBOX.Archives.2011" ('.' is separator)
 # and gives it back as List
@@ -103,11 +109,31 @@ def fetchMailFolders():
         for folder_information in mailfolders_raw:
             #folder_information looks for example like:
             # (\HasNoChildren \UnMarked) "." "INBOX.Archives.2011"
-            folder_name = folder_information.split()[-1].replace('\"', '')
-            mailfolders_parsed.append(folder_name)
+            folder_information = folder_information.split('\"')
+            #Some folders are only for navigation. They have the parameter (\Noselect)
+            if "Noselect" not in folder_information[0]:
+                mailfolders_parsed.append(folder_information[-2])
     else:
-        print "Error in looking up folders"
+        logging.critical("Could not load mailboxes: %s",check)
+        exit(1)
+        
+    logging.debug("Mail Folders: %s", str(mailfolders_parsed))
     return mailfolders_parsed
+
+class DecodeError(Exception):
+    pass
+
+def decode_string(string, encoding):
+    try:
+        return cgi.escape(unicode(string, encoding)).encode('ascii', 'xmlcharrefreplace')
+    except Exception as e:
+        logging.warning("Encoding failed: Trying brute force encoding (should work) - %s",str(e))
+        for charset in ("utf-8", 'latin-1', 'iso-8859-1', 'us-ascii', 'windows-1252','us-ascii'):
+            try:
+                return cgi.escape(unicode(string, charset)).encode('ascii', 'xmlcharrefreplace')
+            except Exception:
+                continue
+        raise DecodeError("Could not decode string")
 
 # This object wraps the imaplib and email for a lazy access of the important elements of an email
 # Getting the Header and the Hashcode will only need a few KB independent of the mail-size
@@ -122,6 +148,7 @@ class LazyMail(object):
         self.__from = None
         self.__to = None
         self.__date = None
+        self.__maildataRaw = None
 
     #Returns a non formated or parsed header
     def getHeader(self):
@@ -133,7 +160,7 @@ class LazyMail(object):
             self.__fetchedHeader = str(maildata_raw)
             return self.__fetchedHeader
         else:
-            print 'Could not fetch mail header ',self.__uid
+            logging.warning("Could not fetch mail header for ", self.__uid)
 
     # Lazy fetches the Header (1000 characters~4k per uid) and calculates a hash of it for avoid multiple backups
     # (Important for mails with attachments)
@@ -149,14 +176,18 @@ class LazyMail(object):
     #Return the email class of the lib email
     def getParsedMail(self):
         if not self.__parsedMail:
-            print "Fetch complete mail..."
-            check, maildata_raw = MAIL_CONNECTION.uid("FETCH", self.__uid, '(RFC822)')
-            if check == 'OK':
-                self.__parsedMail = email.message_from_string(maildata_raw[0][1])
-            else:
-                print 'Could not fetch mail ', self.__uid
-
+            self.__parsedMail = email.message_from_string(self.getRawMaildata()[0][1])
         return self.__parsedMail
+    
+    #Lazy fetches the maildata    
+    def getRawMaildata(self):
+        if not self.__maildataRaw:
+            check, self.__maildataRaw = MAIL_CONNECTION.uid("FETCH", self.__uid, '(RFC822)')
+            if check == 'OK':
+                logging.debug("Successfully downloaded mail: %s", self.getHashcode())
+            else:
+                logging.warning("Could not download mail: %s", self.getHashcode())
+        return self.__maildataRaw       
 
     #Returns the well formated 'from'
     def getFrom(self):
@@ -165,14 +196,17 @@ class LazyMail(object):
             mail_from_encoding = decode_header(self.getParsedMail().get('From'))[0][1]
             if not mail_from_encoding:
                 mail_from_encoding = "utf-8"
-
-            self.__from = cgi.escape(unicode(mail_from, mail_from_encoding)).encode('ascii', 'xmlcharrefreplace')
-
+            try:
+                self.__from = decode_string(mail_from, mail_from_encoding) #cgi.escape(unicode(mail_from, mail_from_encoding)).encode('ascii', 'xmlcharrefreplace')
+            except Exception as e:
+                logging.warning("Could not decode 'from' because of %s",e) 
+                self.__from="(Could not decode)"
         return self.__from
 
     #return the well formated 'subject'
     def getSubject(self):
         if not self.__subject:
+            
             mail_subject = decode_header(self.getParsedMail().get('Subject'))[0][0]
             mail_subject_encoding = decode_header(self.getParsedMail().get('Subject'))[0][1]
             if not mail_subject_encoding:
@@ -180,8 +214,12 @@ class LazyMail(object):
 
             if not mail_subject:
                 mail_subject = "(No Subject)"
-
-            self.__subject = cgi.escape(unicode(mail_subject, mail_subject_encoding)).encode('ascii', 'xmlcharrefreplace')
+            
+            try:
+                self.__subject = decode_string(mail_subject,mail_subject_encoding) #cgi.escape(unicode(mail_subject, mail_subject_encoding)).encode('ascii', 'xmlcharrefreplace')
+            except Exception as e:
+                logging.warning("Could not decode subject because of %s",e) 
+                self.__subject = "(Could not decode)"
 
         return self.__subject
 
@@ -192,9 +230,11 @@ class LazyMail(object):
             mail_to_encoding = decode_header(self.getParsedMail().get('To'))[0][1]
             if not mail_to_encoding:
                 mail_to_encoding = "utf-8"
-
-            self.__to = cgi.escape(unicode(mail_to, mail_to_encoding)).encode('ascii', 'xmlcharrefreplace')
-
+            try:
+                self.__to = decode_string(mail_to, mail_to_encoding) #cgi.escape(unicode(mail_to, mail_to_encoding)).encode('ascii', 'xmlcharrefreplace')
+            except Exception as e:
+                logging.warning("Could not decode 'to' because of %s",e) 
+                self.__to = "(Could not decode)"
         return self.__to
 
     #returns the date as string, like "Wed, 18 Apr 2014 10:14:48 +0200"
@@ -212,6 +252,8 @@ class LazyMail(object):
         content_of_mail = {}
         content_of_mail['text'] = ""
         content_of_mail['html'] = ""
+        
+        check = True
 
         for part in self.getParsedMail().walk():
             part_content_type = part.get_content_type()
@@ -220,13 +262,14 @@ class LazyMail(object):
                 part_decoded_contents = part.get_payload(decode=True)
                 try:
                     if part_charset[0]:
-                        content_of_mail['text'] += cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
+                        content_of_mail['text'] += decode_string(str(part_decoded_contents), part_charset[0])# cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
                     else:
                         content_of_mail['text'] += cgi.escape(str(part_decoded_contents)).encode('ascii', 'xmlcharrefreplace')
-                except Exception:
+                except Exception as e:
                     content_of_mail['text'] += "Error decoding mail contents."
-                    print("Error decoding mail contents")
-
+                    logging.error("Could not decode content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
+                    check = False
+            
                 continue
             elif part_content_type == 'text/html':
                 part_decoded_contents = part.get_payload(decode=True)
@@ -235,12 +278,13 @@ class LazyMail(object):
                         content_of_mail['html'] += unicode(str(part_decoded_contents), part_charset[0]).encode('ascii', 'xmlcharrefreplace')
                     else:
                         content_of_mail['html'] += str(part_decoded_contents).encode('ascii', 'xmlcharrefreplace')
-                except Exception:
+                except Exception as e:
                     content_of_mail['html'] += "Error decoding mail contents."
-                    print("Error decoding mail contents")
+                    logging.error("Could not decode content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
+                    check = False
 
                 continue
-        return content_of_mail
+        return check, content_of_mail
 
 
 #Get Mail UIDs of mail_folder (in mailfolders_parsed)
@@ -251,7 +295,7 @@ def getUIDs(mail_folder):
         MAIL_UIDs = uids_raw[0].split()
         return MAIL_UIDs
     else:
-        print "Error in fetching UIDs for folder", mail_folder
+        logging.warning("Could not fetch UIDs for mailbox %s", mail_folder)
         return []
 
 
@@ -261,7 +305,7 @@ def getUIDs(mail_folder):
 def addHashCodeToDatabase(hashcode):
     DATABASE_FILE.write(hashcode+"\n") #The \n has to be removed by reading
     DATABASE.add(hashcode)
-    print "Added ",hashcode
+    logging.debug("Added hashcode %s to database", hashcode)
     global STATS_EMAIL_IN_DATABASE
     STATS_EMAIL_IN_DATABASE +=1
 
@@ -272,15 +316,12 @@ def addHashCodeToDatabase(hashcode):
 #The Date-Path can be configured
 #Returns true if successful. If it returns false there was at least a little failure. No rollback is made
 def saveMailToHardDisk(lazy_mail):
-    print " Saving Mail: ",lazy_mail.getFrom(), ">",lazy_mail.getSubject()
-
     #Getting path from date
     parsed_mail = lazy_mail.getParsedMail()
     date_raw = email.utils.parsedate_tz(parsed_mail['Date'])
     if date_raw:
         local_date_raw = datetime.datetime.fromtimestamp(email.utils.mktime_tz(date_raw))
         path = local_date_raw.strftime(FOLDER_SYSTEM)
-        print path
     else:
         path = "NoDate/"
 
@@ -292,23 +333,33 @@ def saveMailToHardDisk(lazy_mail):
             os.makedirs(mail_folder_path)
 
         #Save attachments: If there are no, False will be returned
-        attachments = saveAttachmentsToHardDisk(parsed_mail, os.path.join(mail_folder_path,lazy_mail.getHashcode()))
+        check_attachments, attachments = saveAttachmentsToHardDisk(lazy_mail, mail_folder_path)
 
         #Create HTML-File
-        file_message_without_attachment = open(os.path.join(mail_folder_path,lazy_mail.getHashcode())+".html", 'w')
-        writeToHTML(lazy_mail, attachments, file_message_without_attachment)
+        full_path =os.path.join(mail_folder_path,lazy_mail.getHashcode())+".html" 
+        file_message_without_attachment = open(full_path, 'w')
+        check_html = writeToHTML(lazy_mail, attachments, file_message_without_attachment)
         file_message_without_attachment.close()
 
     except Exception as e:
         #If anything has failed
-        print "Could not write file: ",e
+        logging.error("Failed to save mail (%s,%s) because of %s",lazy_mail.getDate(), lazy_mail.getSubject(), e)
         return False
-    return True
-
+    
+    if check_attachments and check_html: 
+        logging.info("Saved mail (From: %s, Subject: %s) to %s", lazy_mail.getFrom(), lazy_mail.getSubject(), full_path)
+        return True
+    elif check_attachments or check_html: 
+        logging.info("Partly saved mail (From: %s, Subject: %s) to %s", lazy_mail.getFrom(), lazy_mail.getSubject(), full_path)
+        return False
+    else:
+        logging.info("Could not save mail (From: %s, Subject: %s)", lazy_mail.getFrom(), lazy_mail.getSubject())
+        return False
 
 
 #Writes a lazy_mail to a given HTML-File
 def writeToHTML(lazy_mail, attachments, html_file):
+    check = True
     try:
         #HTML-Header
         html_file.write("<!DOCTYPE html> <html lang=\"en\"> <head> <title>")
@@ -342,7 +393,7 @@ def writeToHTML(lazy_mail, attachments, html_file):
             html_file.write("\t<tr>\n")
             html_file.write("\t\t<td>Attachments: </td><td>")
             for attachment in attachments:
-                html_file.write("<a href=\""+lazy_mail.getHashcode()+"-"+attachment+"\">"+attachment+"</a>")
+                html_file.write("<a href=\""+attachment[0]+"\">"+attachment[1]+"</a>")
                 if attachment is not attachments[-1]:
                     html_file.write(", ")
             html_file.write("</td>\n")
@@ -351,7 +402,7 @@ def writeToHTML(lazy_mail, attachments, html_file):
         html_file.write("</table>\n")
         html_file.write("<div class=\"col-md-8 col-md-offset-1 footer\"> <hr /><div style=\"white-space: pre-wrap;\">")
         #Write content to File
-        content_of_mail = lazy_mail.getContent()
+        check, content_of_mail = lazy_mail.getContent()
         if content_of_mail['text']:
             html_file.write("<pre>")
             strip_header = re.sub(r"(?i)<html>.*?<head>.*?</head>.*?<body>", "", content_of_mail['text'], flags=re.DOTALL)
@@ -377,13 +428,17 @@ def writeToHTML(lazy_mail, attachments, html_file):
         html_file.write("</div></div></body></html>")
 
     except Exception as e:
-        print "Could not write to HTML"
+        logging.error("Could not write HTML because of %s",e)
+        raise e
+    
+    return check
 
 #Saves the attachments of a LazyMail to disk. Uses the Path 'folder_prefix-filename'
 #E.g for folder_prefix="2014/05/03/4a9fd924" and filename="photo.jpg" it will be "2014/05/03/4a9fd924-photo.jpg"
-def saveAttachmentsToHardDisk(mail, folder_prefix):
-    attachments_filenames = []
-    for part in mail.walk():
+def saveAttachmentsToHardDisk(lazy_mail, folder):
+    attachments_tuple_for_html = []
+    successfull = True
+    for part in lazy_mail.getParsedMail().walk():
         content_maintype = part.get_content_maintype()
         if content_maintype == 'multipart' or content_maintype == 'text' or content_maintype == 'html':
             continue
@@ -391,55 +446,61 @@ def saveAttachmentsToHardDisk(mail, folder_prefix):
         if part.get('Content-Disposition') == None:
             continue
         
-        attachment_name = part.get_filename()
-        if not attachment_name:
-            print "Empty Part in E-Mail!"
-            print str(part)
+        attachment_filename = part.get_filename()
+        if not attachment_filename:
+            logging.warning("Empty part in mail. Don't know what to do with it!")
+            logging.debug(str(part))
             continue
-        attachments_filenames += [attachment_name]
-        attachment_path = folder_prefix+"-"+attachment_name
+        
+        attachment_folder_name = os.path.join("attachments-"+lazy_mail.getHashcode(),"")
+        attachment_folder_path = os.path.join(folder, attachment_folder_name) 
+        attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,attachment_filename)]        
+        
+        if not os.path.exists(attachment_folder_path):
+            os.makedirs(attachment_folder_path)        
+        
+        attachment_path = attachment_folder_path+attachment_filename
        
         try:
             attachment_file_disk = open(attachment_path, "wb")
             attachment_file_disk.write(part.get_payload(decode=True))
-            print "Saved attachment ", attachment_path
+            logging.info("Saved attachment %s to %s",attachment_filename, attachment_path)
             global STATS_ADDED_ATTACHMENTS
             STATS_ADDED_ATTACHMENTS += 1
         except Exception as e:
+            successfull = False;
             global STATS_FAILED_ATTACHMENTS
             STATS_FAILED_ATTACHMENTS+=1
-            print "Failed to save attachment "+attachment_path
-            print e
-            print part.get_filename()
-            raise e #TODO Create new Exception
+            logging.error("Failed to save attachment %s: %s", attachment_filename, e)
 
-    return attachments_filenames
+    return successfull, attachments_tuple_for_html
 
 
 #goes through all folders and checks the emails
 for mailfolder in fetchMailFolders():
-    print "Go through folder ",mailfolder
     try:
-        MAIL_CONNECTION.select(mailfolder, readonly=True)
-        for uid in getUIDs(mailfolder):
-            mail = LazyMail(uid)
-            #Do not download the mail again, if you already have it in an previous run
-            if not mail.getHashcode() in DATABASE:
-                if saveMailToHardDisk(mail):
-                    addHashCodeToDatabase(mail.getHashcode())
-                    STATS_ADDED_EMAILS+=1
-                else:
-                    print "Failed to save ", mail.getHashcode()
-                    STATS_FAILED_EMAILS+=1
-
-        MAIL_CONNECTION.close()
+        folder_state = MAIL_CONNECTION.select(mailfolder, readonly=True)
+        if folder_state[0]=='OK':
+            logging.info("Opened folder %s which contains %s mails", mailfolder, folder_state[1][0])
+            for uid in getUIDs(mailfolder):
+                mail = LazyMail(uid)
+                #Do not download the mail again, if you already have it in an previous run
+                if not mail.getHashcode() in DATABASE:
+                    if saveMailToHardDisk(mail):
+                        addHashCodeToDatabase(mail.getHashcode())
+                        STATS_ADDED_EMAILS+=1
+                    else:
+                        logging.error("Failed to save mail with hashcode %s", mail.getHashcode())
+                        STATS_FAILED_EMAILS+=1
+                      
+            MAIL_CONNECTION.close()
+            logging.info("Closed folder %s", mailfolder)
+        else:
+            logging.error("Could not connect to mailbox %s because of %s", mailfolder, folder_state)
+        
     except Exception as e:
         STATS_FAILED_FOLDERS+=1
-        print "Could not download folder ",mailfolder
-        print e
-        print "This can happen if the folder is empty or not correct created/deleted"
-
-
+        logging.error("Failed to process mailbox %s because of %s",mailfolder, e)
 
 #close the database file, so that all new hashcodes are saved
 DATABASE_FILE.close()
@@ -447,6 +508,7 @@ DATABASE_FILE.close()
 # (would be closed automatically after some time, but if there are too
 #  many open connections, we maybe cannot login for some time)
 MAIL_CONNECTION.logout()
+logging.info("Closed connection to server")
 
 
 #Stats

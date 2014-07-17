@@ -12,7 +12,7 @@ import ConfigParser
 import logging
 from email.header import decode_header
 
-logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+
 #Configuration
 FOLDER_SYSTEM = "%Y/%m/%d/" #%H/%M/"
 DATABASE_FILE_PATH =None
@@ -21,20 +21,54 @@ MAIL_SERVER=None
 MAIL_USER=None 
 MAIL_PASSWORD=None 
 MAIL_PORT=None
+SAVE_EML = True
+
 
 #Load Configuration from ini
 CONFIG = ConfigParser.RawConfigParser()
 try:
     if len(sys.argv)>1 and os.path.isfile(sys.argv[1]):
         CONFIG.read(sys.argv[1])
-        logging.info("Loaded configuration: %s", sys.argv[1])
+        print "Loaded configuration: %s"%sys.argv[1]
     else:
         CONFIG.read("./config.ini")
-        logging.info("Loaded default configuartion from ./config.ini")
+        print "Loaded default configuartion from ./config.ini"
 except Exception as e:
-    logging.ctritical("Could not load Configuration: %s",e)
+    print "Could not load Configuration: %s"%e
     exit(1)
+ 
+#Logging
+try:
+    logging_level = CONFIG.get('logging', 'level')
+    if logging_level == 'DEBUG':
+        logging_level = logging.DEBUG
+    elif logging_level == 'INFO':
+        logging_level = logging.INFO
+    elif logging_level == 'WARNING':
+        logging_level = logging.WARNING
+    elif logging_level == 'ERROR':
+        logging_level = logging.ERROR
+    else:
+        logging_level = logging.INFO
+except Exception as e:
+    logging_level = logging.INFO
 
+try:
+    logging_file = CONFIG.get('logging', 'logfile')
+    try:
+        logging_clear = CONFIG.get('logging', 'remove_old')
+        if logging_clear == 'True':
+            os.remove(logging_file)
+    except:
+        pass
+            
+    logging.basicConfig(format='%(levelname)s:%(message)s',filename=logging_file, level=logging_level)
+    
+except:    
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging_level)
+
+
+#most important parameters
 try:
     MAIL_SERVER = CONFIG.get('mail', 'imap_server')
     MAIL_USER = CONFIG.get('mail', 'imap_user')
@@ -52,6 +86,7 @@ except Exception as e:
     print "[backup]"
     print "database_file = ./database.db"
     print "backup_folder = ./backup-mail/"
+    print "also_save_as_eml = True"
     print ""
     print "You can also pass the ini by parameter and give it another name as config.ini"
     print "You can also define imap_port to get another port"
@@ -62,6 +97,14 @@ try:
     logging.info("Using port: %s", MAIL_PORT)
 except:
     MAIL_PORT = None #Default
+
+#EML-Parameter
+try:
+    SAVE_EML= False
+    if CONFIG.get('backup','also_save_as_eml')=='True':
+        SAVE_EML = True
+except:
+    pass
 
 #Stats
 STATS_EMAIL_IN_DATABASE = 0
@@ -126,16 +169,37 @@ class DecodeError(Exception):
 
 def decode_string(string, encoding):
     try:
-        return cgi.escape(unicode(string, encoding)).encode('ascii', 'xmlcharrefreplace')
+        if encoding:
+            return cgi.escape(unicode(string, encoding)).encode('ascii', 'xmlcharrefreplace')
+        else:
+            return cgi.escape(string).encode('ascii', 'xmlcharrefreplace')
     except Exception as e:
         logging.warning("Encoding failed: Trying brute force encoding (should work) - %s",str(e))
         for charset in ("utf-8", 'latin-1', 'iso-8859-1', 'us-ascii', 'windows-1252','us-ascii'):
             try:
-                return cgi.escape(unicode(string, charset)).encode('ascii', 'xmlcharrefreplace')
+                ret = cgi.escape(unicode(string, charset)).encode('ascii', 'xmlcharrefreplace')
+                logging.info("Brute force encoding successfull: %s", charset)
+                return ret
             except Exception:
                 continue
         raise DecodeError("Could not decode string")
-
+        
+def encode_unicode(string, encoding):
+    try:
+        if encoding:
+            return unicode(string, encoding).encode('ascii', 'xmlcharrefreplace')
+        else:
+            return string.encode('ascii', 'xmlcharrefreplace')
+    except Exception as e:
+        logging.warning("Encoding failed: Trying brute force encoding (should work) - %s",str(e))
+        for charset in ("utf-8", 'latin-1', 'iso-8859-1', 'us-ascii', 'windows-1252','us-ascii'):
+            try:
+                ret = unicode(string, charset).encode('ascii', 'xmlcharrefreplace')
+                logging.info("Brute force encoding successfull: %s", charset)
+                return ret
+            except Exception:
+                continue
+        raise e
 # This object wraps the imaplib and email for a lazy access of the important elements of an email
 # Getting the Header and the Hashcode will only need a few KB independent of the mail-size
 # If you want to have the content, the whole mail with attachments will be fetched
@@ -262,30 +326,35 @@ class LazyMail(object):
             if part_content_type == 'text/plain':
                 part_decoded_contents = part.get_payload(decode=True)
                 try:
-                    if part_charset[0]:
-                        content_of_mail['text'] += decode_string(str(part_decoded_contents), part_charset[0])# cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
-                    else:
-                        content_of_mail['text'] += cgi.escape(str(part_decoded_contents)).encode('ascii', 'xmlcharrefreplace')
+                    content_of_mail['text'] += decode_string(str(part_decoded_contents), part_charset[0])# cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
                 except Exception as e:
                     content_of_mail['text'] += "Error decoding mail contents."
-                    logging.error("Could not decode content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
+                    logging.error("Could not decode text content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
                     check = False
             
                 continue
             elif part_content_type == 'text/html':
                 part_decoded_contents = part.get_payload(decode=True)
                 try:
-                    if part_charset[0]:
-                        content_of_mail['html'] += unicode(str(part_decoded_contents), part_charset[0]).encode('ascii', 'xmlcharrefreplace')
-                    else:
-                        content_of_mail['html'] += str(part_decoded_contents).encode('ascii', 'xmlcharrefreplace')
+                    content_of_mail['html'] += encode_unicode(str(part_decoded_contents), part_charset[0])
                 except Exception as e:
                     content_of_mail['html'] += "Error decoding mail contents."
-                    logging.error("Could not decode content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
+                    logging.error("Could not decode html content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
                     check = False
 
                 continue
         return check, content_of_mail
+        
+    def getBaseFilename(self):
+        return self.getHashcode()
+        
+    def saveEMLtoFile(self, folder_path):
+       full_path = os.path.join(folder_path,self.getBaseFilename()+".eml")
+       emlfile = open(full_path, 'w')
+       emlfile.write(self.getRawMaildata()[0][1])
+       emlfile.close()
+       logging.debug("Saved EML %s",full_path)
+           
 
 
 #Get Mail UIDs of mail_folder (in mailfolders_parsed)
@@ -332,7 +401,14 @@ def saveMailToHardDisk(lazy_mail):
         mail_folder_path = os.path.join(BACKUP_FOLDER_PATH,path)
         if not os.path.exists(mail_folder_path):
             os.makedirs(mail_folder_path)
-
+        
+        #save eml file which can be opened with thunderbird (is more or less what the server has returned)
+        if SAVE_EML:
+            eml_path = os.path.join(mail_folder_path, "eml",)
+            if not os.path.exists(eml_path):
+                os.makedirs(eml_path)
+            lazy_mail.saveEMLtoFile(eml_path)
+        
         #Save attachments: If there are no, False will be returned
         check_attachments, attachments = saveAttachmentsToHardDisk(lazy_mail, mail_folder_path)
 
@@ -394,7 +470,7 @@ def writeToHTML(lazy_mail, attachments, html_file):
             html_file.write("\t<tr>\n")
             html_file.write("\t\t<td>Attachments: </td><td>")
             for attachment in attachments:
-                html_file.write("<a href=\""+attachment[0]+"\">"+attachment[1]+"</a>")
+                html_file.write("<a href=\""+attachment[0]+"\">"+decode_string(str(attachment[1]), None)+"</a>")
                 if attachment is not attachments[-1]:
                     html_file.write(", ")
             html_file.write("</td>\n")
@@ -424,8 +500,8 @@ def writeToHTML(lazy_mail, attachments, html_file):
             html_file.write(strip_header)
 
         #HTML-Footer
-        html_file.write("</div> <div class=\"col-md-8 col-md-offset-1 footer\"> <hr /><div style=\"white-space: pre-wrap;\">")
-        html_file.write(lazy_mail.getHeader())
+        #html_file.write("</div> <div class=\"col-md-8 col-md-offset-1 footer\"> <hr /><div style=\"white-space: pre-wrap;\">")
+        #html_file.write(lazy_mail.getHeader())
         html_file.write("</div></div></body></html>")
 
     except Exception as e:
@@ -441,38 +517,47 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
     filename_count = dict() #to handle attachments with same name
     successfull = True
     for part in lazy_mail.getParsedMail().walk():
-        content_maintype = part.get_content_maintype()
-        if content_maintype == 'multipart' or content_maintype == 'text' or content_maintype == 'html':
-            continue
-
-        if part.get('Content-Disposition') == None:
-            continue
-        
-        attachment_filename = part.get_filename()
-        if not attachment_filename:
-            logging.warning("Empty part in mail. Don't know what to do with it!")
-            logging.debug(str(part))
-            continue
-       
-        #put a (x) behind filename if same filename already exists
-        if attachment_filename in filename_count:
-            logging.debug("Same Filename %s",attachment_filename)
-            root, ext = os.path.splitext(attachment_filename)
-            attachment_filename = root+"("+filename_count[attachment_filename]+")"+ext
-            filename_count[attachment_filename] = filename_count[attachment_filename]+1
-        else:
-            filename_count[attachment_filename] = 1            
-       
-        attachment_folder_name = os.path.join("attachments-"+lazy_mail.getHashcode(),"")
-        attachment_folder_path = os.path.join(folder, attachment_folder_name) 
-        attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,attachment_filename)]        
-        
-        if not os.path.exists(attachment_folder_path):
-            os.makedirs(attachment_folder_path)        
-        
-        attachment_path = attachment_folder_path+attachment_filename
-       
         try:
+            content_maintype = part.get_content_maintype()
+            if content_maintype == 'multipart' or content_maintype == 'text' or content_maintype == 'html':
+                continue
+    
+            if part.get('Content-Disposition') == None:
+                continue
+
+            try:
+                attachment_filename = decode_header(part.get_filename())[0][0]
+                attachment_filename_encoding = decode_header(part.get_filename())[0][1]
+            except Exception as e:
+                logging.error("Could not encode filename")
+                attachment_filename = "(could not encode filename)"
+                attachment_filename_encoding = None
+                successfull = False
+            
+            if not attachment_filename:
+                logging.warning("Empty part in mail. Don't know what to do with it!")
+                logging.debug(str(part))
+                continue
+           
+            #put a (x) behind filename if same filename already exists
+            if attachment_filename in filename_count:
+                logging.debug("Same Filename %s",attachment_filename)
+                root, ext = os.path.splitext(attachment_filename)
+                attachment_filename = root+"("+filename_count[attachment_filename]+")"+ext
+                filename_count[attachment_filename] = filename_count[attachment_filename]+1
+            else:
+                filename_count[attachment_filename] = 1            
+           
+            attachment_folder_name = os.path.join("attachments",lazy_mail.getHashcode(),"")
+            attachment_folder_path = os.path.join(folder, attachment_folder_name) 
+            attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,decode_string(attachment_filename, attachment_filename_encoding))]     #TODO   
+            
+            if not os.path.exists(attachment_folder_path):
+                os.makedirs(attachment_folder_path)        
+            
+            attachment_path = attachment_folder_path+attachment_filename
+       
+        
             attachment_file_disk = open(attachment_path, "wb")
             attachment_file_disk.write(part.get_payload(decode=True))
             logging.info("Saved attachment %s to %s",attachment_filename, attachment_path)
@@ -490,6 +575,11 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
 #goes through all folders and checks the emails
 for mailfolder in fetchMailFolders():
     try:
+        #SPAM
+        if mailfolder[-4:-1].lower() == 'spam':
+            logging.info("Skip folder %s",mailfolder)
+            continue
+        
         folder_state = MAIL_CONNECTION.select(mailfolder, readonly=True)
         if folder_state[0]=='OK':
             logging.info("Opened folder %s which contains %s mails", mailfolder, folder_state[1][0])

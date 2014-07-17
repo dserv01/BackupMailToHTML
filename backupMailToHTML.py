@@ -156,12 +156,17 @@ def fetchMailFolders():
             folder_information = folder_information.split('\"')
             #Some folders are only for navigation. They have the parameter (\Noselect)
             if "Noselect" not in folder_information[0]:
-                mailfolders_parsed.append(folder_information[-2])
+                for folder_name in folder_information[-1:0:-1]:
+                    if folder_name:
+                        while folder_name[0]==' ':
+                            folder_name = folder_name[1:]
+                        mailfolders_parsed.append(folder_name)
+                        break;
     else:
         logging.critical("Could not load mailboxes: %s",check)
         exit(1)
         
-    logging.debug("Mail Folders: %s", str(mailfolders_parsed))
+    logging.debug("Mail Folders: %s", str(mailfolders_raw))
     return mailfolders_parsed
 
 class DecodeError(Exception):
@@ -543,7 +548,7 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
             if attachment_filename in filename_count:
                 logging.debug("Same Filename %s",attachment_filename)
                 root, ext = os.path.splitext(attachment_filename)
-                attachment_filename = root+"("+filename_count[attachment_filename]+")"+ext
+                attachment_filename = root+"("+str(filename_count[attachment_filename])+")"+ext
                 filename_count[attachment_filename] = filename_count[attachment_filename]+1
             else:
                 filename_count[attachment_filename] = 1            

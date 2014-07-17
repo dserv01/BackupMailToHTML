@@ -117,14 +117,21 @@ However, I only access it in Read-Mode, so there is no way to transmit any stole
 One safety aspect is to mention: The configuration is not encrypted! If someone steals your configuration, he has access to your mails! So be aware, that this file is read-protected by the file system. 
 
 
+Changelog
+----------
+Version 0.1
+- Beta Version: Working but some edge-cases can lead to unexpected behavior. However the worst thing possible should be a crash of the software or the 'not saving' of an email (but this should be detected and notified).
+- Automatic Attachment renaming for attachments with same name
+- Saving of attachments whose name could not be encoded
+- logging with logging-level and file
+- Exclude Spam
+
 Planed
 ---------
 - Time Constraint
 - Folder Constraint
 - Make Folder System changeable
-- Allow multiple attachments with same name
 - Allow attachments without a name
-- Logging
 
 
 License

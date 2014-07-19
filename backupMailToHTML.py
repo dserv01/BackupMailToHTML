@@ -222,15 +222,15 @@ class LazyMail(object):
 
     #Returns a non formated or parsed header
     def getHeader(self):
-        if self.__fetchedHeader:
-            return self.__fetchedHeader
-        #print "Fetch Header..."
-        check, maildata_raw = MAIL_CONNECTION.uid("FETCH", self.__uid, '(RFC822.HEADER)')
-        if check == 'OK':
-            self.__fetchedHeader = str(maildata_raw)
-            return self.__fetchedHeader
-        else:
-            logging.warning("Could not fetch mail header for ", self.__uid)
+        if not self.__fetchedHeader:
+            #print "Fetch Header..."
+            check, maildata_raw = MAIL_CONNECTION.uid("FETCH", self.__uid, '(RFC822.HEADER)')
+            if check == 'OK':
+                self.__fetchedHeader = maildata_raw[0][1]
+            else:
+                logging.warning("Could not fetch mail header for ", self.__uid)
+        return self.__fetchedHeader
+        
 
     # Lazy fetches the Header (1000 characters~4k per uid) and calculates a hash of it for avoid multiple backups
     # (Important for mails with attachments)
@@ -581,7 +581,7 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
 for mailfolder in fetchMailFolders():
     try:
         #SPAM
-        if mailfolder[-4:-1].lower() == 'spam':
+        if mailfolder[-4:].lower() == 'spam':
             logging.info("Skip folder %s",mailfolder)
             continue
         

@@ -12,7 +12,6 @@ import ConfigParser
 import logging
 from email.header import decode_header
 
-
 #Configuration
 FOLDER_SYSTEM = "%Y/%m/%d/" #%H/%M/"
 DATABASE_FILE_PATH =None
@@ -22,7 +21,7 @@ MAIL_USER=None
 MAIL_PASSWORD=None 
 MAIL_PORT=None
 SAVE_EML = True
-
+ONLY_LAST_X_DAYS = None
 
 #Load Configuration from ini
 CONFIG = ConfigParser.RawConfigParser()
@@ -98,6 +97,12 @@ try:
 except:
     MAIL_PORT = None #Default
 
+try:
+    ONLY_LAST_X_DAYS = int(CONFIG.get('backup', 'only_last_x_days'))
+    print "Only checking Mails of the last ", ONLY_LAST_X_DAYS," days"
+except:
+    ONLY_LAST_X_DAYS = None
+
 #EML-Parameter
 try:
     SAVE_EML= False
@@ -171,30 +176,13 @@ def fetchMailFolders():
 
 class DecodeError(Exception):
     pass
-
-def decode_string(string, encoding):
-    try:
-        if encoding:
-            return cgi.escape(unicode(string, encoding)).encode('ascii', 'xmlcharrefreplace')
-        else:
-            return cgi.escape(string).encode('ascii', 'xmlcharrefreplace')
-    except Exception as e:
-        logging.warning("Encoding failed: Trying brute force encoding (should work) - %s",str(e))
-        for charset in ("utf-8", 'latin-1', 'iso-8859-1', 'us-ascii', 'windows-1252','us-ascii'):
-            try:
-                ret = cgi.escape(unicode(string, charset)).encode('ascii', 'xmlcharrefreplace')
-                logging.info("Brute force encoding successfull: %s", charset)
-                return ret
-            except Exception:
-                continue
-        raise DecodeError("Could not decode string")
         
-def encode_unicode(string, encoding):
+def encode_string(string, encoding):
     try:
         if encoding:
             return unicode(string, encoding).encode('ascii', 'xmlcharrefreplace')
         else:
-            return string.encode('ascii', 'xmlcharrefreplace')
+            return unicode(string).encode('ascii', 'xmlcharrefreplace')
     except Exception as e:
         logging.warning("Encoding failed: Trying brute force encoding (should work) - %s",str(e))
         for charset in ("utf-8", 'latin-1', 'iso-8859-1', 'us-ascii', 'windows-1252','us-ascii'):
@@ -267,7 +255,7 @@ class LazyMail(object):
             if not mail_from_encoding:
                 mail_from_encoding = "utf-8"
             try:
-                self.__from = decode_string(mail_from, mail_from_encoding) #cgi.escape(unicode(mail_from, mail_from_encoding)).encode('ascii', 'xmlcharrefreplace')
+                self.__from = cgi.escape(encode_string(mail_from, mail_from_encoding)) #cgi.escape(unicode(mail_from, mail_from_encoding)).encode('ascii', 'xmlcharrefreplace')
             except Exception as e:
                 logging.warning("Could not decode 'from' because of %s",e) 
                 self.__from="(Could not decode)"
@@ -286,7 +274,7 @@ class LazyMail(object):
                 mail_subject = "(No Subject)"
             
             try:
-                self.__subject = decode_string(mail_subject,mail_subject_encoding) #cgi.escape(unicode(mail_subject, mail_subject_encoding)).encode('ascii', 'xmlcharrefreplace')
+                self.__subject = cgi.escape(encode_string(mail_subject,mail_subject_encoding)) #cgi.escape(unicode(mail_subject, mail_subject_encoding)).encode('ascii', 'xmlcharrefreplace')
             except Exception as e:
                 logging.warning("Could not decode subject because of %s",e) 
                 self.__subject = "(Could not decode)"
@@ -301,7 +289,7 @@ class LazyMail(object):
             if not mail_to_encoding:
                 mail_to_encoding = "utf-8"
             try:
-                self.__to = decode_string(mail_to, mail_to_encoding) #cgi.escape(unicode(mail_to, mail_to_encoding)).encode('ascii', 'xmlcharrefreplace')
+                self.__to = cgi.escape(encode_string(mail_to, mail_to_encoding)) #cgi.escape(unicode(mail_to, mail_to_encoding)).encode('ascii', 'xmlcharrefreplace')
             except Exception as e:
                 logging.warning("Could not decode 'to' because of %s",e) 
                 self.__to = "(Could not decode)"
@@ -331,7 +319,7 @@ class LazyMail(object):
             if part_content_type == 'text/plain':
                 part_decoded_contents = part.get_payload(decode=True)
                 try:
-                    content_of_mail['text'] += decode_string(str(part_decoded_contents), part_charset[0])# cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
+                    content_of_mail['text'] += cgi.escape(encode_string(str(part_decoded_contents), part_charset[0]))# cgi.escape(unicode(str(part_decoded_contents), part_charset[0])).encode('ascii', 'xmlcharrefreplace')
                 except Exception as e:
                     content_of_mail['text'] += "Error decoding mail contents."
                     logging.error("Could not decode text content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
@@ -341,7 +329,7 @@ class LazyMail(object):
             elif part_content_type == 'text/html':
                 part_decoded_contents = part.get_payload(decode=True)
                 try:
-                    content_of_mail['html'] += encode_unicode(str(part_decoded_contents), part_charset[0])
+                    content_of_mail['html'] += encode_string(str(part_decoded_contents), part_charset[0])
                 except Exception as e:
                     content_of_mail['html'] += "Error decoding mail contents."
                     logging.error("Could not decode html content of mail (%s,%s) because of %s",self.getDate(), self.getSubject(), e)
@@ -365,7 +353,13 @@ class LazyMail(object):
 #Get Mail UIDs of mail_folder (in mailfolders_parsed)
 #They are only unique in mail_folder and session!
 def getUIDs(mail_folder):
-    check, uids_raw = MAIL_CONNECTION.uid('SEARCH', None, "ALL")
+    check, uids_raw = (None, None)
+    if ONLY_LAST_X_DAYS:
+        date = (datetime.date.today() - datetime.timedelta(ONLY_LAST_X_DAYS)).strftime("%d-%b-%Y")
+        check, uids_raw = MAIL_CONNECTION.uid('search', None, '(SENTSINCE {date})'.format(date=date))
+    else:
+        check, uids_raw = MAIL_CONNECTION.uid('SEARCH', None, "ALL")
+
     if check == 'OK':
         MAIL_UIDs = uids_raw[0].split()
         return MAIL_UIDs
@@ -475,7 +469,7 @@ def writeToHTML(lazy_mail, attachments, html_file):
             html_file.write("\t<tr>\n")
             html_file.write("\t\t<td>Attachments: </td><td>")
             for attachment in attachments:
-                html_file.write("<a href=\""+attachment[0]+"\">"+decode_string(str(attachment[1]), None)+"</a>")
+                html_file.write("<a href=\""+attachment[0]+"\">"+cgi.escape(encode_string(str(attachment[1]), None))+"</a>")
                 if attachment is not attachments[-1]:
                     html_file.write(", ")
             html_file.write("</td>\n")
@@ -534,10 +528,16 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
                 attachment_filename = decode_header(part.get_filename())[0][0]
                 attachment_filename_encoding = decode_header(part.get_filename())[0][1]
             except Exception as e:
-                logging.error("Could not encode filename")
-                attachment_filename = "(could not encode filename)"
-                attachment_filename_encoding = None
-                successfull = False
+                logging.debug("Workaround Filename Encoding")
+                logging.debug(str(part))
+                try:
+                    attachment_filename = encode_string(part.get_filename()) #"(could not encode filename)"
+                    logging.debug(attachment_filename)
+                except:
+                    logging.error("Could not encode filename, %s",e)
+                    attachment_filename = "(Could not encode)"
+                    attachment_filename_encoding = None
+                    successfull = False
             
             if not attachment_filename:
                 logging.warning("Empty part in mail. Don't know what to do with it!")
@@ -546,16 +546,17 @@ def saveAttachmentsToHardDisk(lazy_mail, folder):
            
             #put a (x) behind filename if same filename already exists
             if attachment_filename in filename_count:
-                logging.debug("Same Filename %s",attachment_filename)
+                filename_count[attachment_filename] = filename_count[attachment_filename]+1
+                logging.debug("Same Filename %s",attachment_filename)               
                 root, ext = os.path.splitext(attachment_filename)
                 attachment_filename = root+"("+str(filename_count[attachment_filename])+")"+ext
-                filename_count[attachment_filename] = filename_count[attachment_filename]+1
+                
             else:
                 filename_count[attachment_filename] = 1            
            
             attachment_folder_name = os.path.join("attachments",lazy_mail.getHashcode(),"")
             attachment_folder_path = os.path.join(folder, attachment_folder_name) 
-            attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,decode_string(attachment_filename, attachment_filename_encoding))]     #TODO   
+            attachments_tuple_for_html += [(attachment_folder_name+attachment_filename,cgi.escape(encode_string(attachment_filename, attachment_filename_encoding)))]     #TODO   
             
             if not os.path.exists(attachment_folder_path):
                 os.makedirs(attachment_folder_path)        

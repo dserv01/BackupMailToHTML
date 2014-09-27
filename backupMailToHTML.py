@@ -7,16 +7,10 @@ import logging
 # Configuration
 from Configuration import Configuration
 from SavableLazyMail import SavableLazyMail
+from Statistics import Statistics
 
 CONFIG = Configuration()
 
-#Stats
-STATS_EMAIL_IN_DATABASE = 0
-STATS_ADDED_EMAILS = 0
-STATS_ADDED_ATTACHMENTS = 0
-STATS_FAILED_FOLDERS = 0
-STATS_FAILED_EMAILS = 0
-STATS_FAILED_ATTACHMENTS = 0
 
 #Load Hashcodes from File
 DATABASE = set()
@@ -30,7 +24,7 @@ print "Loading Database...."
 for line in DATABASE_FILE:
     DATABASE.add(line.replace('\n', ''))
 logging.info("Loaded %i mail hash values from database", len(DATABASE))
-STATS_EMAIL_IN_DATABASE = len(DATABASE)
+STATS = Statistics(len(DATABASE))
 DATABASE_FILE.close()
 #Open Database-File for appending new HashCodes
 DATABASE_FILE = open(CONFIG.DATABASE_FILE_PATH, 'a')
@@ -42,6 +36,7 @@ try:
     MAIL_CONNECTION.login(CONFIG.MAIL_USER, CONFIG.MAIL_PASSWORD)
     logging.info("Successfully connected to %s@%s", CONFIG.MAIL_USER, CONFIG.MAIL_SERVER)
 except imaplib.IMAP4.error as e:
+    print "Failed to connect"
     logging.error("Could not connect to %s@%s", CONFIG.MAIL_USER, CONFIG.MAIL_SERVER)
     logging.error("Reason: %s", e)
     exit(1)
@@ -103,9 +98,6 @@ def addHashCodeToDatabase(hashcode):
     DATABASE_FILE.write(hashcode + "\n")  #The \n has to be removed by reading
     DATABASE.add(hashcode)
     logging.debug("Added hashcode %s to database", hashcode)
-    global STATS_EMAIL_IN_DATABASE
-    STATS_EMAIL_IN_DATABASE += 1
-
 
 #goes through all folders and checks the emails
 for mailfolder in fetchMailFolders():
@@ -119,15 +111,15 @@ for mailfolder in fetchMailFolders():
         if folder_state[0] == 'OK':
             logging.info("Opened folder %s which contains %s mails", mailfolder, folder_state[1][0])
             for uid in getUIDs(mailfolder):
-                mail = SavableLazyMail(CONFIG, MAIL_CONNECTION, uid)
+                mail = SavableLazyMail(CONFIG, MAIL_CONNECTION, uid, STATS)
                 #Do not download the mail again, if you already have it in an previous run
                 if not mail.getHashcode() in DATABASE:
                     if mail.saveMailToHardDisk():
                         addHashCodeToDatabase(mail.getHashcode())
-                        STATS_ADDED_EMAILS += 1
+                        STATS.email_successful_added()
                     else:
                         logging.error("Failed to save mail with hashcode %s", mail.getHashcode())
-                        STATS_FAILED_EMAILS += 1
+                        STATS.email_failed_to_add()
 
             MAIL_CONNECTION.close()
             logging.info("Closed folder %s", mailfolder)
@@ -135,7 +127,7 @@ for mailfolder in fetchMailFolders():
             logging.error("Could not connect to mailbox %s because of %s", mailfolder, folder_state)
 
     except Exception as e:
-        STATS_FAILED_FOLDERS += 1
+        STATS.folder_failed_to_backup()
         logging.error("Failed to process mailbox %s because of %s", mailfolder, e)
 
 #close the database file, so that all new hashcodes are saved
@@ -148,12 +140,6 @@ logging.info("Closed connection to server")
 
 
 #Stats
-print ""
-print "==STATS=========================================="
-print STATS_EMAIL_IN_DATABASE, " emails in database"
-print STATS_ADDED_EMAILS, " new emails downloaded"
-print STATS_ADDED_ATTACHMENTS, " new attachments downloaded"
-print STATS_FAILED_FOLDERS, " folders failed to download"
-print STATS_FAILED_EMAILS, " mails failed to download"
-#print STATS_FAILED_ATTACHMENTS, " attachments failed to download" TODO
+print STATS.toString()
+
 

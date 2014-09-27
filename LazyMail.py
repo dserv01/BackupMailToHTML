@@ -30,6 +30,7 @@ def encode_string(string, encoding):
 # If you want to have the content, the whole mail with attachments will be fetched
 class LazyMail(object):
     def __init__(self, mail_connection, uid):
+        self.__parsedHeader = None
         self.__uid = uid
         self.__fetchedHeader = None
         self.__headerhash = None
@@ -52,6 +53,10 @@ class LazyMail(object):
                 logging.warning("Could not fetch mail header for ", self.__uid)
         return self.__fetchedHeader
 
+    def getParsedHeader(self):
+        if not self.__parsedHeader:
+            self.__parsedHeader = email.message_from_string(self.getHeader())
+        return self.__parsedHeader
 
     # Lazy fetches the Header (1000 characters~4k per uid) and calculates a hash of it for avoid multiple backups
     # (Important for mails with attachments)
@@ -84,8 +89,8 @@ class LazyMail(object):
 
     def getFrom(self):
         if not self.__from:
-            mail_from = email.utils.parseaddr(self.getParsedMail().get('From'))[1]
-            mail_from_encoding = decode_header(self.getParsedMail().get('From'))[0][1]
+            mail_from = email.utils.parseaddr(self.getParsedHeader().get('From'))[1]
+            mail_from_encoding = decode_header(self.getParsedHeader().get('From'))[0][1]
             if not mail_from_encoding:
                 mail_from_encoding = "utf-8"
             try:
@@ -99,8 +104,8 @@ class LazyMail(object):
     def getSubject(self):
         if not self.__subject:
 
-            mail_subject = decode_header(self.getParsedMail().get('Subject'))[0][0]
-            mail_subject_encoding = decode_header(self.getParsedMail().get('Subject'))[0][1]
+            mail_subject = decode_header(self.getParsedHeader().get('Subject'))[0][0]
+            mail_subject_encoding = decode_header(self.getParsedHeader().get('Subject'))[0][1]
             if not mail_subject_encoding:
                 mail_subject_encoding = "utf-8"
 
@@ -118,8 +123,8 @@ class LazyMail(object):
     #returns the well formated 'to'
     def getTo(self):
         if not self.__to:
-            mail_to = email.utils.parseaddr(self.getParsedMail().get('To'))[1]
-            mail_to_encoding = decode_header(self.getParsedMail().get('To'))[0][1]
+            mail_to = email.utils.parseaddr(self.getParsedHeader().get('To'))[1]
+            mail_to_encoding = decode_header(self.getParsedHeader().get('To'))[0][1]
             if not mail_to_encoding:
                 mail_to_encoding = "utf-8"
             try:
@@ -132,7 +137,7 @@ class LazyMail(object):
     #returns the date as string, like "Wed, 18 Apr 2014 10:14:48 +0200"
     def getDate(self):
         if not self.__date:
-            mail_date = decode_header(self.getParsedMail().get('Date'))[0][0]
+            mail_date = decode_header(self.getParsedHeader().get('Date'))[0][0]
             self.__date = mail_date
         return self.__date
 

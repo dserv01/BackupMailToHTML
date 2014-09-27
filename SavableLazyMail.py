@@ -11,7 +11,8 @@ __author__ = 'doms'
 
 
 class SavableLazyMail(LazyMail):
-    def __init__(self, config, mail_connection, uid):
+    def __init__(self, config, mail_connection, uid, stats):
+        self.STATS = stats
         self.CONFIG = config
         LazyMail.__init__(self, mail_connection, uid)
 
@@ -208,12 +209,10 @@ class SavableLazyMail(LazyMail):
                 attachment_file_disk = open(attachment_path, "wb")
                 attachment_file_disk.write(part.get_payload(decode=True))
                 logging.info("Saved attachment %s to %s", attachment_filename, attachment_path)
-                #global STATS_ADDED_ATTACHMENTS TODO
-                #STATS_ADDED_ATTACHMENTS += 1 TODO
+                self.STATS.succesfully_safed_attachment()
             except Exception as e:
                 successful = False
-                #global STATS_FAILED_ATTACHMENTS TODO
-                #STATS_FAILED_ATTACHMENTS += 1 TODO
+                self.STATS.failed_to_safe_attachment()
                 logging.error("Failed to save attachment %s: %s", attachment_filename, e)
 
         return successful, attachments_tuple_for_html

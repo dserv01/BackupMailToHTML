@@ -45,7 +45,7 @@ class Configuration(object):
                 logging_level = logging.ERROR
             else:
                 logging_level = logging.INFO
-        except Exception as e:
+        except:
             logging_level = logging.INFO
 
         try:
